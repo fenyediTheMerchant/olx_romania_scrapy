@@ -1,3 +1,9 @@
+# Importing mandatory libraries
+# Scrapy for scraping, json for processing JSON files
+# CSV to safe files as CSV, 
+# Requests to make and recieve Requests, and SYS and GETOPT 
+# to parse arguments to the script
+# Time for using the sleep function
 import scrapy
 from scrapy.crawler import CrawlerProcess
 import json
@@ -5,143 +11,195 @@ import csv
 import re
 import requests
 import sys, getopt
+import time
 
+# Getting all of the args from the command line
 commandLineArgs = sys.argv[1:]
 
+# Defining options for the script, to be used as modifiers
 unixOptions = "ho:s:l:f:"
 gnuOptions = ["help", "output=", "sleep=", "limit=", "offsetIncrement="]
 
-try:
-    oplist, args = getopt.getopt(commandLineArgs,unixOptions, gnuOptions)
-except getopt.GetoptError:
-    print('usage:   python3 olx_scraper.py -o <outputfile> category_id city_id')
+if len(sys.argv) < 2:
+    print('usage:   python3 olx_scraper.py -o <outputfile> "Category_Name" "City_Name"\n')
+    print('mentions:\nCity names can be either UPPER or LOWER case, or the mix of it!\nGiving an output file name is mandatory!')
     sys.exit(2)
+else:
+    try:
+        oplist, args = getopt.getopt(commandLineArgs,unixOptions, gnuOptions)    
+    except getopt.GetoptError:
+        print('usage:   python3 olx_scraper.py -o <outputfile> "Category_Name" "City_Name"')
+        print('mentions:\nCity names can be either UPPER or LOWER case, or the mix of it!\nGiving an output file name is mandatory!')
+        sys.exit(2)
+    # Setting the values of the two base variables
+    # These will be used when generating the accces URL
+    category_id = args[0]
+    city_id = args[1]
 
-outputfile = ''
+# Error handling, if not all required args are given
+
+
+# Initializing option variables
+outputfileName = 'defaultFileName'
 sleep = 0
 limit = 10
 offsetIncrement = 10
-#ez azert van igy, mivel az oplisten belul levo opcioknak is vannak argumentumai
+
+# HUN COMMENT FOR MAIN DEVELOPER ONLY #
+# Ez azert van igy, mivel az oplisten belul levo opcioknak is vannak argumentumai
 # -o outputfile.csv itt az argumentum az outputfile
 for opt, arg in oplist:
     if opt == '-h':
-        print('usage:   python3 olx_scraper.py category_id city_id -o <outputfile>')
+        print('usage:   python3 olx_scraper.py -o <outputfile> "Category_Name" "City_Name"')
         print('Options: -h, -o, -s, -l, -f (--help, --output<filename>, --sleep, --limit, --offsetIncrement')
+        print('mentions:\nCity names can be either UPPER or LOWER case, or the mix of it!\nGiving an output file name is mandatory!')
         sys.exit()
     elif opt in ("-o", "--output"):
-        outputfile = arg
+        outputfileName = arg
     elif opt in ("-s", "--sleep"):
-        sleep = arg
+        sleep = int(arg)
     elif opt in ("-l", "--limit"):
         limit = arg
     elif opt in ("-f", "--offsetIncrement"):
         offsetIncrement = arg
-category_id = args[0]
-city_id = args[1]
-outputfileName = outputfile
 
-# Argumentumok kiirasa DEBUG
+
+# DEBUG Printing out the parsed arguments
 print(oplist,args)
 print(outputfileName)
 
-# Json adat definialasa mindket allomanyra
-# Varosok input file
-fileCities = open('cities.json')
+# Defining the JSON input files
+# Cities input file
+fileCities = open('data/cities.json')
 citiesData = json.load(fileCities)
-# Kategoriak input file
-fileCategories = open('categories.json')
+# Categories input file
+fileCategories = open('data/categories.json')
 categoriesData = json.load(fileCategories)
 
-# A keresendo ertekek a szureskor
+# Key values for the searched city/ category
 keyValCities = city_id
 keyvalCategories = category_id
 
-# Mindket esetben megkeressuk s vissza teritjuk a listat ha kaptunk valamit
+# We search and filter in both instances, if a match is found, we save the list to the 
+# corresponding variables
 resultCities = list(filter(lambda x:x['name'].lower()==keyValCities.lower(),citiesData['data']))
 resultCategories = list(filter(lambda x:x['name'].lower()==keyvalCategories.lower(),categoriesData['data']))
 
-# Ellenorizzuk hogy van e talalat
-if len(resultCities) <= 0 or len(resultCategories) <= 0: print("A megadott település/ kategória nem található! \nKérjük adjon meg egy létező települést/ kategóriát!.")
+# Checking if there is any result for the search
+# If none is found in either of the lists, then abort
+if len(resultCities) <= 0 or len(resultCategories) <= 0: 
+    # print("A megadott település/ kategória nem található! \nKérjük adjon meg egy létező települést/ kategóriát!.")
+    print("The given city/category cannot be found!\nPlease choose an existing city/category, or check the spelling of the city/category!")
+    sys.exit(2)
 else:
-    # print("A vizsgálandó település adatai:")
-    # print(resultCities)
+    # Saving  the results to the corresponding variables
     city_result_id = resultCities[0]['id']
     city_name = resultCities[0]['name']
+    # DEBUG Printing out the values
     print("Result id = ", city_result_id)
     print("Result name = ",city_name)
-    # print("A vizsgálandó kategoria adatai:")
-    # print(resultCategories)
+
     categories_result_id = resultCategories[0]['id']
     categories_name = resultCategories[0]['name']
+    # DEBUG Printing out the values
     print("Result id = ", categories_result_id)
     print("Result name = ",categories_name)
 
-# Fileok lezarasa
+# Closing the input files
 fileCities.close
 fileCategories.close
 
+# Crawling trough the Webiste
+# Defining(overriding) the main Spider class
 class Olx(scrapy.Spider):
+    # Setting the name for the Spider
     name = 'olxScraper'
 
-    url = f'https://m.olx.ro/api/v1/offers/?limit=10&category_id={categories_result_id}&city_id={city_result_id}&sort_by=created_at%3Adesc'
+    # Setting the start URL
+    url = f'https://m.olx.ro/api/v1/offers/?limit={limit}&category_id={categories_result_id}&city_id={city_result_id}&sort_by=created_at%3Adesc'
+    
+    # DEBUG Printing the URL
     print(url)
+    
+    # Defining extra headers for the Request
+    # We are defining only the user agent, to "not be as noticeable" for the Server
     headers = {
         'user-agent' : 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
     }
 
-    #ez csak akkor hivodik meg ha netrol scrapel
+    # Defining the INIT for the self instance of the Spider
+    # It creates the output file, with the file name given as a parameter
+    # Also it creates the headers for the CSV file
     def __init__(self):
-        with open('./results/%s.csv' % outputfileName, 'w') as csv_file:
+        with open('./rawResults/%s.csv' % outputfileName, 'w') as csv_file:
             csv_file.write('id, title, last_refresh_time, created_time, highlighted, urgent, top_ad, price, currency, negotiable, previous_value, business, locationID, locationName, regionID, regionName, categoryID, categoryName, delivery, safeDeal, url\n')
 
-    
+    # Defining the START_REQUESTS for the Spider
+    # Setting the offset to the 0 start value (the scraping will begin from the first result set)
+    # Saving the data given back by the Request to the variable R + adding the offset to it, to iterate over the result set
+    # Starting the loop, to iterate trough the data set
+    # The exit condition is that if the requests wasn't successful
+    # TBD
+    # Incrementing the offset by the given amount
+    # Getting the next request
     def start_requests(self):
         offset = 0
         r = requests.get(url=self.url + '&offset=' + str(offset))
         while (r.ok):
+            # DEBUG Printing the status code of the request
             print(r.status_code)
+            # TBD
+            time.sleep(sleep)
             yield scrapy.Request(url=self.url + '&offset=' + str(offset), headers=self.headers, callback=self.parse)
-            offset += 10
+            # Offset can be static, and user given from the arguments
+            # offset += 10
+            offset += int(offsetIncrement)
             r = requests.get(url=self.url + '&offset=' + str(offset))
 
-
+    # Defining the parse method of the Scraper
     def parse(self, res):
+        # Storing the text of the Response to a variable
         data = res.text
-        data = json.loads(data)
+        # Loading the data from the variable and parsing as JSON
+        jsonDict = json.loads(data)
 
-        for offer in data['data']:
-            items = {
-                'id' : offer['id'],
-                'title' : offer['title'],
-                'last_refresh_time' : offer['last_refresh_time'],
-                'created_time' : offer['created_time'],
-                #'description' : offer['description'].replace('\n', ' ').replace('<br />', ' '),
-                'highlighted' : offer['promotion']['highlighted'],
-                'urgent' : offer['promotion']['urgent'],
-                'top_ad' : offer['promotion']['top_ad'],
-                'price' : offer['params'][0]['value']['value'],
-                'currency' : offer['params'][0]['value']['currency'],
-                'negotiable' : offer['params'][0]['value']['negotiable'],
-                'previous_value' : offer['params'][0]['value']['previous_value'],
+        # Iterating trough the jsonDict and saving the needed data
+        for advert in jsonDict['data']:
+            details = {
+                'id' : advert['id'],
+                'title' : advert['title'],
+                'last_refresh_time' : advert['last_refresh_time'],
+                'created_time' : advert['created_time'],
+                #'description' : advert['description'].replace('\n', ' ').replace('<br />', ' '),
+                'highlighted' : advert['promotion']['highlighted'],
+                'urgent' : advert['promotion']['urgent'],
+                'top_ad' : advert['promotion']['top_ad'],
+                'price' : advert['params'][0]['value']['value'],
+                'currency' : advert['params'][0]['value']['currency'],
+                'negotiable' : advert['params'][0]['value']['negotiable'],
+                'previous_value' : advert['params'][0]['value']['previous_value'],
                 #'state' : offer['params'][-1]['value']['key'], #???????????
-                'business' : offer['business'],
-                'locationID' : offer['location']['city']['id'],
-                'locationName' : offer['location']['city']['name'],
-                'regionID' : offer['location']['region']['id'],
-                'regionName' : offer['location']['region']['name'],
-                'categoryID' : offer['category']['id'],
-                'categoryName' : offer['category']['type'],
-                'delivery' : offer['delivery']['rock']['active'],
-                'safeDeal' : offer['safedeal']['status'],
-                'url' : offer['url']
-
+                'business' : advert['business'],
+                'locationID' : advert['location']['city']['id'],
+                'locationName' : advert['location']['city']['name'],
+                'regionID' : advert['location']['region']['id'],
+                'regionName' : advert['location']['region']['name'],
+                'categoryID' : advert['category']['id'],
+                'categoryName' : advert['category']['type'],
+                'delivery' : advert['delivery']['rock']['active'],
+                'safeDeal' : advert['safedeal']['status'],
+                'url' : advert['url']
             }
-            print(json.dumps(items, indent=2))
-            with open('./results/%s.csv' % outputfileName, 'a') as csv_file:
-                writer = csv.DictWriter(csv_file, fieldnames=items.keys())
-                writer.writerow(items)
 
-#Run Online
+            # DEBUG Printing the collected data in each iteration, with the indent of 2
+            # print(json.dumps(details, indent=2))
+
+            # Appending the newly collected details about the curent advert to the OUTPUT.CSV file
+            with open('./rawResults/%s.csv' % outputfileName, 'a') as csv_file:
+                writer = csv.DictWriter(csv_file, fieldnames=details.keys())
+                writer.writerow(details)
+
+# Creating, and running the Crawler
 process = CrawlerProcess()
 process.crawl(Olx)
 process.start()
